@@ -1,0 +1,693 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "caseNumber": { 
+            "type": "int",
+            "metadata": { "description": "the case number you are working - this is used to tag all resources and generate a unique storage account name" }
+        },
+        "adminName": {
+            "type": "string",
+            "defaultValue": "vmAdmin",
+            "metadata": { "description": "the VM admin login name." }
+        },
+        "adminSshPublicKey": { 
+            "type": "string",
+            "metadata": { "description": "the VM admin SSH public key" }
+        },
+        "adminIpAddress": {
+            "type": "string",
+            "metadata": { "description": "the VM admin's source IP Address." }
+        },
+        "writerIpAddresses": {
+            "type": "array",
+            "metadata": { "description": "If you are allowing a remote user to upload data, specify this address" }
+        },
+        "readerIpAddresses": {
+            "type": "array",
+            "metadata": { "description": "If you are allowing a remote user to download data, specify this address" }
+        },
+        "utcNow":{
+            "type":"string",
+            "defaultValue": "[utcNow('u')]"
+        },
+        "tokenExpirationInDays": {
+            "type": "int",
+            "defaultValue": 90,
+            "metadata": {
+                "description": "days until reader and writer SAS tokens expire"
+            }
+        },
+        "vnetAddressSpace": {
+            "type":"string",
+            "defaultValue": "172.16.128.0/24",
+            "metadata": {
+                "description": "use this value to control the address space of the VMs VNet."
+            }
+        },
+        "vmImageReference": {
+            "type": "object", 
+            "metadata": {
+                "description": "Use this default or specify an image reference of yoru choice"
+            },
+            "defaultValue": {
+                "publisher": "canonical",
+                "offer": "0001-com-ubuntu-server-jammy",
+                "sku": "22_04-lts-gen2",
+                "version": "latest"
+            }
+        },
+        "vmDiskSizeInGb": {
+            "type": "int",
+            "metadata": {
+                "description": "VM OS Disk Size in GB - default is 30GB"
+            },
+            "defaultValue": 30
+        }
+    },
+    "variables": {
+        "uniquKey": "[uniqueString(string(parameters('caseNumber')), subscription().id)]",
+        "storageAccountName": "[concat('evidence', variables('uniquKey'))]",
+        "keyVaultName": "[concat('sastokens', variables('uniquKey'))]",
+        "ipName": "[concat('pip-', parameters('caseNumber'))]",
+        "logAnalyticsName": "[concat('la-', parameters('caseNumber'))]",
+        "nicName": "[concat('nic-', parameters('caseNumber'))]",
+        "nsgName": "[concat('nsg-', parameters('caseNumber'))]",
+        "vmName": "[concat('vm-', parameters('caseNumber'))]",
+        "vnetName": "[concat('vnet-', parameters('caseNumber'))]",
+        "stgPepName": "[concat('stgpep-', parameters('caseNumber'))]",
+        "kvPepName": "[concat('kvpep-', parameters('caseNumber'))]",
+        "allIps": "[concat(parameters('readerIpAddresses'), parameters('writerIpAddresses'), array(parameters('adminIpAddress')))]"      
+    },
+    "resources": [
+         {
+            "apiVersion": "2017-03-15-preview",
+            "type": "Microsoft.OperationalInsights/workspaces",
+            "name": "[variables('logAnalyticsName')]",
+            "location": "[resourceGroup().location]",
+            "tags": "[resourceGroup().tags]",
+            "properties": {
+                "sku": {
+                    "name": "perGb2018"
+                }
+            }
+        },
+        {
+            "comments": "the RFC1918 space may need to be adjusted, check the parameters.",
+            "type": "Microsoft.Network/virtualNetworks",
+            "apiVersion": "2022-07-01",
+            "name": "[variables('vnetName')]",
+            "location": "[resourceGroup().location]",
+            "tags": "[resourceGroup().tags]",   
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "[parameters('vnetAddressSpace')]"
+                    ]
+                },
+                "subnets":[
+                    {
+                        "name": "default",
+                        "properties": {
+                            "addressPrefix": "[parameters('vnetAddressSpace')]",
+                            "delegations": [],
+                            "purpose": "PrivateEndpoints",
+                            "privateEndpointNetworkPolicies": "Disabled",
+                            "privateLinkServiceNetworkPolicies": "Enabled"
+                        },
+                        "type": "Microsoft.Network/virtualNetworks/subnets"
+                    }
+                ],
+                "virtualNetworkPeerings": [],
+                "enableDdosProtection": false
+            }
+        },
+        {
+            "comments":"This needs to be a precise duplication of the subnet in the array of the VNet resource otherwise you will not be able to redeploy this idempotently... not even going to link the issue... this is a fun backwards compatability issue for Azure Network.",
+            "name": "[concat(variables('vnetName'), '/default')]",
+            "type": "Microsoft.Network/virtualNetworks/subnets",
+            "dependsOn": [
+                "[variables('vnetName')]"
+            ],
+            "apiVersion": "2022-07-01",
+            "properties": {
+                "addressPrefix": "[parameters('vnetAddressSpace')]",
+                "delegations": [],
+                "purpose": "PrivateEndpoints",
+                "privateEndpointNetworkPolicies": "Disabled",
+                "privateLinkServiceNetworkPolicies": "Enabled"
+            }
+        },
+        {
+            "comments": "If you are using Bastion or a Landing Zone, you can remove this and it's references",
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "apiVersion": "2022-07-01",
+            "name": "[variables('nsgName')]",
+            "location": "[resourceGroup().location]",
+            "tags": "[resourceGroup().tags]",
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "SSH",
+                        "type": "Microsoft.Network/networkSecurityGroups/securityRules",
+                        "properties": {
+                            "protocol": "TCP",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "22",
+                            "sourceAddressPrefix": "[concat(parameters('adminIpAddress'), '/32')]",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 300,
+                            "direction": "Inbound",
+                            "sourcePortRanges": [],
+                            "destinationPortRanges": [],
+                            "sourceAddressPrefixes": [],
+                            "destinationAddressPrefixes": []
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "comments": "if you are using Bastion or a Landing Zone, you can remove this, but you will have some work to do to setup the networking. You could also switch this to a dynamic IP.",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "apiVersion": "2022-07-01",
+            "name": "[variables('ipName')]",
+            "location": "[resourceGroup().location]",
+            "tags": "[resourceGroup().tags]",
+            "sku": {
+                "name": "Standard",
+                "tier": "Regional"
+            },
+            "properties": {
+                "publicIPAddressVersion": "IPv4",
+                "publicIPAllocationMethod": "Static",
+                "idleTimeoutInMinutes": 4,
+                "ipTags": []
+            }
+        },
+        {
+            "comments": "This account could be trimmed down to just be a blob store... but... I'm lazy and it's Sunday.",
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2023-01-01",
+            "name": "[variables('storageAccountName')]",
+            "location": "[resourceGroup().location]",
+            "tags": "[resourceGroup().tags]",
+            "sku": {
+                "name": "Standard_LRS",
+                "tier": "Standard"
+            },
+            "kind": "StorageV2",
+            "properties": {
+                "minimumTlsVersion": "TLS1_2",
+                "allowBlobPublicAccess": false,
+                "networkAcls": {
+                    "bypass": "AzureServices",
+                    "virtualNetworkRules": [],
+                    "ipRules": [],
+                    "defaultAction": "Deny"
+                },
+                "supportsHttpsTrafficOnly": true,
+                "encryption": {
+                    "services": {
+                        "file": {
+                            "keyType": "Account",
+                            "enabled": true
+                        },
+                        "blob": {
+                            "keyType": "Account",
+                            "enabled": true
+                        }
+                    },
+                    "keySource": "Microsoft.Storage"
+                },
+                "accessTier": "Hot"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices",
+            "apiVersion": "2023-01-01",
+            "name": "[concat(variables('storageAccountName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ],
+            "sku": {
+                "name": "Standard_LRS",
+                "tier": "Standard"
+            },
+            "properties": {
+                "cors": {
+                    "corsRules": []
+                },
+                "deleteRetentionPolicy": {
+                    "allowPermanentDelete": false,
+                    "enabled": false
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2023-01-01",
+            "name": "[concat(variables('storageAccountName'), '/default/evidence')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ],
+            "properties": {
+                "immutableStorageWithVersioning": {
+                    "enabled": false
+                },
+                "defaultEncryptionScope": "$account-encryption-key",
+                "denyEncryptionScopeOverride": false,
+                "publicAccess": "None"
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2022-11-01",
+            "name": "[variables('vmName')]",
+            "location": "[resourceGroup().location]",
+            "tags": "[resourceGroup().tags]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]",
+                "[resourceId('Microsoft.Storage/StorageAccounts', variables('storageAccountName'))]"
+            ],
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "Standard_D2s_v3"
+                },
+                "storageProfile": {
+                    "imageReference": "[parameters('vmImageReference')]",
+                    "osDisk": {
+                        "osType": "Linux",
+                        "name": "[concat(parameters('caseNumber'), '_OsDisk_1_', uniqueString('caseNumber', subscription().id))]",
+                        "createOption": "FromImage",
+                        "caching": "ReadWrite",                        
+                        "deleteOption": "Delete",
+                        "diskSizeGB": "[parameters('vmDiskSizeInGb')]"
+                    },
+                    "dataDisks": []
+                },
+                "osProfile": {
+                    "computerName": "[parameters('caseNumber')]",
+                    "adminUsername": "[parameters('adminName')]",
+                    "linuxConfiguration": {
+                        "disablePasswordAuthentication": true,
+                        "ssh": {
+                            "publicKeys": [
+                                {
+                                    "path": "[concat('/home/', parameters('adminName'),'/.ssh/authorized_keys')]",
+                                    "keyData": "[parameters('adminSshPublicKey')]"
+                                }
+                            ]
+                        },
+                        "provisionVMAgent": true,
+                        "patchSettings": {
+                            "patchMode": "ImageDefault",
+                            "assessmentMode": "ImageDefault"
+                        },
+                        "enableVMAgentPlatformUpdates": false
+                    },
+                    "secrets": [],
+                    "allowExtensionOperations": false
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]",
+                            "properties": {
+                                "deleteOption": "Delete"
+                            }
+                        }
+                    ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": true,
+                        "storageUri": "[reference(variables('storageAccountName'), '2023-01-01', 'Full').properties.primaryEndpoints.blob]"
+                    }
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2022-07-01",
+            "name": "[variables('nicName')]",
+            "location": "[resourceGroup().location]",
+            "tags": "[resourceGroup().tags]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses', variables('ipName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'default')]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+            ],
+            "kind": "Regular",
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('ipName'))]"                        
+                            },
+                            "subnet": {
+                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'default')]"
+                            },
+                            "primary": true,
+                            "privateIPAddressVersion": "IPv4"
+                        }
+                    }
+                ],
+                "dnsSettings": {
+                    "dnsServers": []
+                },
+                "enableAcceleratedNetworking": true,
+                "enableIPForwarding": false,
+                "disableTcpStateTracking": false,
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+                },
+                "nicType": "Standard"
+            }
+        },
+        {
+            "type": "Microsoft.KeyVault/vaults",
+            "apiVersion": "2022-07-01",
+            "location": "[resourceGroup().location]",            
+            "name": "[variables('keyVaultName')]",
+            "tags": "[resourceGroup().tags]",
+            "properties": {
+                "sku": {
+                    "family": "A",
+                    "name": "standard"
+                },
+                "networkAcls": {
+                    "bypass": "None",
+                    "defaultAction": "Deny",
+                    "ipRules": [],
+                    "virtualNetworkRules": []
+                },
+                "tenantId": "[subscription().tenantId]",
+                "accessPolicies": [],
+                "enabledForDeployment": false,
+                "enabledForDiskEncryption": false,
+                "enabledForTemplateDeployment": false,
+                "enableRbacAuthorization": true,
+                "publicNetworkAccess": "Disabled"
+            }
+        },
+        {
+            "name": "keyVaultDiag",
+            "type": "Microsoft.Insights/diagnosticSettings",
+            "apiVersion": "2021-05-01-preview",
+            "scope": "[concat('Microsoft.KeyVault/vaults/', variables('keyVaultName'))]",
+            "dependsOn":[
+                "[variables('keyVaultName')]",
+                "[variables('logAnalyticsName')]"
+            ],
+            "properties": {                
+                "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]",
+                "logs": [
+                    {
+                        "categoryGroup": "audit",
+                        "enabled": true
+                    },
+                    {
+                        "categoryGroup": "allLogs",
+                        "enabled": true
+                    }
+                ],
+                "metrics": []                
+            }
+        },
+        {
+            "name": "storageDiag",
+            "type": "Microsoft.Insights/diagnosticSettings",
+            "apiVersion": "2021-05-01-preview",
+            "scope": "[format('Microsoft.Storage/storageAccounts/{0}/blobServices/default', variables('storageAccountName'))]",
+            "dependsOn":[
+                "[variables('storageAccountName')]",
+                "[variables('logAnalyticsName')]"
+            ],
+            "properties": {                
+                "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]",
+                "logs": [
+                    {
+                        "category": "StorageRead",
+                        "enabled": true
+                    },
+                    {
+                        "category": "StorageWrite",
+                        "enabled": true
+                    },
+                    {
+                        "category": "StorageDelete",
+                        "enabled": true
+                    }                    
+                ],
+                "metrics": []                
+            }
+        },        
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "comments": "this deploys the VM Identity as secrets reader for the Key Vault",
+            "name": "1ae0497f-dec2-4d70-8126-116358bb8540",
+            "apiVersion": "2022-04-01",
+            "dependsOn": [
+                "[variables('keyVaultName')]"
+            ],
+            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "properties": {
+                "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/4633458b-17de-408a-b874-0445c86b69e6",                        
+                "principalId": "[reference(resourceId('Microsoft.Compute/virtualMachines', variables('vmName')), '2019-03-01', 'Full').identity.principalId]"
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones",
+            "apiVersion": "2018-09-01",
+            "name": "privatelink.vaultcore.azure.net",
+            "dependsOn": [],
+            "location": "global",
+            "tags": "[resourceGroup().tags]",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones",
+            "apiVersion": "2018-09-01",
+            "name": "privatelink.blob.core.windows.net",
+            "dependsOn": [],
+            "location": "global",
+            "tags": "[resourceGroup().tags]",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints",
+            "apiVersion": "2021-05-01",
+            "location": "[resourceGroup().location]",
+            "name": "[variables('kvPepName')]",
+            "tags": "[resourceGroup().tags]",
+            "dependsOn": [
+                "[variables('keyVaultName')]",
+                "[variables('vnetName')]"
+            ],
+            "properties": {
+                "subnet": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'default')]"
+                },
+                "customNetworkInterfaceName": "[concat(variables('kvPepName'), '-nic')]",
+                "privateLinkServiceConnections": [
+                    {
+                        "name": "[variables('kvPepName')]",
+                        "properties": {
+                            "privateLinkServiceId": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+                            "groupIds": [ "vault" ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints",
+            "apiVersion": "2021-05-01",
+            "location": "[resourceGroup().location]",
+            "name": "[variables('stgPepName')]",
+            "tags": "[resourceGroup().tags]",
+            "dependsOn": [
+                "[variables('storageAccountName')]",
+                "[variables('vnetName')]"
+            ],
+            "properties": {
+                "subnet": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'default')]"
+                },
+                "customNetworkInterfaceName": "[concat(variables('stgPepName'), '-nic')]",
+                "privateLinkServiceConnections": [
+                    {
+                        "name": "[variables('stgPepName')]",
+                        "properties": {
+                            "privateLinkServiceId": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+                            "groupIds": [ "blob" ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+            "apiVersion": "2018-09-01",
+            "name": "[concat('privatelink.vaultcore.azure.net', '/', uniqueString(resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))))]",
+            "location": "global",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('kvPepName'), 'default')]"
+            ],
+            "properties": {
+                "virtualNetwork": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                },
+                "registrationEnabled": false
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+            "apiVersion": "2018-09-01",
+            "name": "[concat('privatelink.blob.core.windows.net', '/', uniqueString(resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))))]",
+            "location": "global",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('stgPepName'), 'default')]"
+            ],
+            "properties": {
+                "virtualNetwork": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                },
+                "registrationEnabled": false
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+            "apiVersion": "2021-05-01",
+            "name": "[concat(variables('kvPepName'), '/', 'default')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[variables('kvPepName')]",
+                "privatelink.vaultcore.azure.net"
+            ],
+            "properties": {
+                "privateDnsZoneConfigs": [
+                    {
+                        "name": "privatelink-vaultcore-azure-net",
+                        "properties": {
+                            "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+            "apiVersion": "2021-05-01",
+            "name": "[concat(variables('stgPepName'), '/', 'default')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[variables('stgPepName')]",
+                "privatelink.blob.core.windows.net"
+            ],
+            "properties": {
+                "privateDnsZoneConfigs": [
+                    {
+                        "name": "privatelink-blob-core-windows-net",
+                        "properties": {
+                            "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.blob.core.windows.net')]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "condition": "[not(empty(parameters('readerIpAddresses')))]",
+            "type": "Microsoft.KeyVault/vaults/secrets",
+            "apiVersion": "2022-07-01",
+            "location": "[resourceGroup().location]",            
+            "name": "[concat(variables('keyVaultName'), '/reader-', replace(parameters('readerIpAddresses')[copyIndex('readerCopy')],'.','-'))]",
+            "tags": "[resourceGroup().tags]",
+            "dependsOn": [
+                "[variables('keyVaultName')]"
+            ],
+            "properties": {
+                "attributes": {
+                    "enabled": true
+                },
+                "contentType": "string",
+                "value": "[listServiceSas(variables('storageAccountName'), '2023-01-01', createObject(
+                            'signedResource','c',
+                            'canonicalizedResource', concat('/blob/', variables('storageAccountName'), '/evidence'),
+                            'signedPermission', 'rl',
+                            'signedProtocol', 'https',
+                            'signedExpiry', dateTimeAdd(parameters('utcNow'), concat('P', parameters('tokenExpirationInDays'),'D')),
+                            'signedIp', parameters('readerIpAddresses')[copyIndex('readerCopy')]
+                        )).serviceSasToken]"
+            },
+            "copy":{
+                "name": "readerCopy",
+                "count": "[length(parameters('readerIpAddresses'))]"
+            }
+        },
+        {
+            "condition": "[not(empty(parameters('writerIpAddresses')))]",
+            "type": "Microsoft.KeyVault/vaults/secrets",
+            "apiVersion": "2022-07-01",
+            "location": "[resourceGroup().location]",            
+            "name": "[concat(variables('keyVaultName'), '/writer-', replace(parameters('writerIpAddresses')[copyIndex('writerCopy')],'.','-'))]",
+            "tags": "[resourceGroup().tags]",
+            "dependsOn": [
+                "[variables('keyVaultName')]"
+            ],
+            "properties": {
+                "attributes": {
+                    "enabled": true
+                },
+                "contentType": "string",
+                "value": "[listServiceSas(variables('storageAccountName'), '2023-01-01', createObject(
+                            'signedResource','c',
+                            'canonicalizedResource', concat('/blob/', variables('storageAccountName'), '/evidence'),
+                            'signedPermission', 'rl',
+                            'signedProtocol', 'https',
+                            'signedExpiry', dateTimeAdd(parameters('utcNow'), concat('P', parameters('tokenExpirationInDays'),'D')),
+                            'signedIp', parameters('writerIpAddresses')[copyIndex('writerCopy')]
+                        )).serviceSasToken]"
+            },
+            "copy":{
+                "name": "writerCopy",
+                "count": "[length(parameters('writerIpAddresses'))]"
+            }
+        }
+    ],
+    "outputs":{
+        "keyVaultName": {
+            "type":"string",
+            "value": "[variables('keyVaultName')]"
+        },
+        "storageAccountName": {
+            "type":"string",
+            "value": "[variables('storageAccountName')]"
+        },
+        "blobContainerUri": {
+            "type":"string",
+            "value": "[concat(reference(variables('storageAccountName'), '2023-01-01').primaryEndpoints.blob, 'evidence')]"
+        },
+        "keyVaultUri":{
+            "type":"string",
+            "value": "[reference(variables('keyVaultName'), '2022-07-01').vaultUri]"
+        },
+        "ipsToAllowInStorage": {
+            "type": "array",
+            "value": "[variables('allIps')]"
+        },
+        "sshConnectionCommand": {
+            "type":"string",
+            "value": "[concat('ssh -i <your-private-key-file> ', parameters('adminName'), '@', reference(variables('ipName'), '2022-09-01').ipAddress)]"
+        }       
+    }
+}

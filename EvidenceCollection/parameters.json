@@ -1,0 +1,24 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "caseNumber": {
+            "value": 123987
+        },
+        "adminName": {
+            "value": "scottley"
+        },
+        "adminSshPublicKey": {
+            "value": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDhesuX2ru+tr0xzj/PGkH3OhrFwiHQm7BEnRBBdbWjaBUVA46TdvxRa5WLze9hDR04pOOcAxrnkxpfYT+e/NLig/eh79NMXUV3ZctVv1AWPC8Dk/9azkR6K6fUPr6KUC3InkDSvze85eMkQtS6izyM0eooU2f7uflVYm+o9nE9ILwJR7xh2o1q4fcVmfnYDRmr16Dppo1rQQRqUuERgwsS/o2Qa3lsyXuWMLhN6wS1JCgO4KWjBZjN/k6boUrBAP3F60CyhkoNnwk+BJpuKS4mAkI1m0yjsHlLJEnWdJgMBJts9I7jgI8yvUf6UKffd6Oxyzyn+iNAxJHr6j7nBMXwkTasMwDSQsS9/RhK2girSuo95qBOzywqZ0KDmyldWmnBniTEtMavEeYTj8bXa+KcmFdJATfTSutK2h/liIRSueEILqTQqzPItwbBIp+vjs/Tw5afr9aRTSLn/jucU6D3arlwl72UpGPTpC1kkgtdOcESFew2asQDjoFk8k6iUS0= generated-by-azure"
+        },
+        "adminIpAddress": {
+            "value": "73.140.112.227"
+        },
+        "readerIpAddresses": {
+            "value": ["73.140.112.227"]
+        },
+        "writerIpAddresses": {
+            "value": ["73.140.112.227"]
+        }
+    }
+}
