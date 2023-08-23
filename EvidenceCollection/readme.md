@@ -39,7 +39,7 @@ To deploy this:
         },
         "utcNow":{
             "type":"string",                // utcnow has to be in parameters
-            "defaultValue": "[utcNow('u')]" //  to gerneate the expiration of the SAS
+            "defaultValue": "[utcNow('u')]" //  to generate the expiration of the SAS
         },
         "tokenExpirationInDays": {
             "type": "int",
