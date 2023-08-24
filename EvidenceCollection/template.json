@@ -3,8 +3,10 @@
     "contentVersion": "1.0.0.0",
     "parameters": {
         "caseNumber": { 
-            "type": "int",
-            "metadata": { "description": "the case number you are working - this is used to tag all resources and generate a unique storage account name" }
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20,
+            "metadata": { "description": "the case identifier you are working - this is used to tag all resources and generate a unique storage account name" }
         },
         "adminName": {
             "type": "string",
@@ -18,6 +20,12 @@
         "adminIpAddress": {
             "type": "string",
             "metadata": { "description": "the VM admin's source IP Address." }
+        },
+        "allowAdminIpInKeyVault": {
+            "type": "bool",
+            // allow admin to connect to vault by public IP... balancing usability versus forcing login to VM.
+            "metadata": { "description": "Set this to true if you want your admin to be able to access Key Vault from Azure interfaces (az cli, portal, etc...) and not just from the VM" },
+            "defaultValue": false
         },
         "writerIpAddresses": {
             "type": "array",
@@ -77,7 +85,8 @@
         "vnetName": "[concat('vnet-', parameters('caseNumber'))]",
         "stgPepName": "[concat('stgpep-', parameters('caseNumber'))]",
         "kvPepName": "[concat('kvpep-', parameters('caseNumber'))]",
-        "allIps": "[concat(parameters('readerIpAddresses'), parameters('writerIpAddresses'), array(parameters('adminIpAddress')))]"      
+        "allIps": "[concat(parameters('readerIpAddresses'), parameters('writerIpAddresses'), array(parameters('adminIpAddress')))]",
+        "keyVaultAllowedIps": "[if(parameters('allowAdminIpInKeyVault'), array(createObject('value', parameters('adminIpAddress'))), createArray())]"
     },
     "resources": [
          {
@@ -111,6 +120,11 @@
                         "properties": {
                             "addressPrefix": "[parameters('vnetAddressSpace')]",
                             "delegations": [],
+                            "serviceEndpoints": [{
+                                "provisioningState": "Succeeded",
+                                "service": "Microsoft.KeyVault",
+                                "locations": ["*"]
+                            }],
                             "purpose": "PrivateEndpoints",
                             "privateEndpointNetworkPolicies": "Disabled",
                             "privateLinkServiceNetworkPolicies": "Enabled"
@@ -133,6 +147,11 @@
             "properties": {
                 "addressPrefix": "[parameters('vnetAddressSpace')]",
                 "delegations": [],
+                "serviceEndpoints": [{
+                    "provisioningState": "Succeeded",
+                    "service": "Microsoft.KeyVault",
+                    "locations": ["*"]
+                }],
                 "purpose": "PrivateEndpoints",
                 "privateEndpointNetworkPolicies": "Disabled",
                 "privateLinkServiceNetworkPolicies": "Enabled"
@@ -387,8 +406,8 @@
                 "networkAcls": {
                     "bypass": "None",
                     "defaultAction": "Deny",
-                    "ipRules": [],
-                    "virtualNetworkRules": []
+                    "ipRules": "[variables('keyVaultAllowedIps')]",
+                    "virtualNetworkRules": "[if(parameters('allowAdminIpInKeyVault'), createArray(createObject('id', resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'default'), 'ignoreMissingVnetServiceEndpoint', false())), createArray())]"
                 },
                 "tenantId": "[subscription().tenantId]",
                 "accessPolicies": [],
@@ -466,6 +485,7 @@
             }
         },
         {
+            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
             "type": "Microsoft.Network/privateDnsZones",
             "apiVersion": "2018-09-01",
             "name": "privatelink.vaultcore.azure.net",
@@ -484,6 +504,7 @@
             "properties": {}
         },
         {
+            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
             "type": "Microsoft.Network/privateEndpoints",
             "apiVersion": "2021-05-01",
             "location": "[resourceGroup().location]",
@@ -536,6 +557,7 @@
             }
         },
         {
+            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
             "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
             "apiVersion": "2018-09-01",
             "name": "[concat('privatelink.vaultcore.azure.net', '/', uniqueString(resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))))]",
@@ -566,6 +588,7 @@
             }
         },
         {
+            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
             "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
             "apiVersion": "2021-05-01",
             "name": "[concat(variables('kvPepName'), '/', 'default')]",
@@ -620,14 +643,14 @@
                     "enabled": true
                 },
                 "contentType": "string",
-                "value": "[listServiceSas(variables('storageAccountName'), '2023-01-01', createObject(
+                "value": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))).primaryEndpoints.blob, 'evidence/', listServiceSas(variables('storageAccountName'), '2023-01-01', createObject(
                             'signedResource','c',
                             'canonicalizedResource', concat('/blob/', variables('storageAccountName'), '/evidence'),
                             'signedPermission', 'rl',
                             'signedProtocol', 'https',
                             'signedExpiry', dateTimeAdd(parameters('utcNow'), concat('P', parameters('tokenExpirationInDays'),'D')),
                             'signedIp', parameters('readerIpAddresses')[copyIndex('readerCopy')]
-                        )).serviceSasToken]"
+                        )).serviceSasToken)]"
             },
             "copy":{
                 "name": "readerCopy",
@@ -649,14 +672,14 @@
                     "enabled": true
                 },
                 "contentType": "string",
-                "value": "[listServiceSas(variables('storageAccountName'), '2023-01-01', createObject(
+                "value": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))).primaryEndpoints.blob, 'evidence/', listServiceSas(variables('storageAccountName'), '2023-01-01', createObject(
                             'signedResource','c',
                             'canonicalizedResource', concat('/blob/', variables('storageAccountName'), '/evidence'),
-                            'signedPermission', 'rl',
+                            'signedPermission', 'acw',
                             'signedProtocol', 'https',
                             'signedExpiry', dateTimeAdd(parameters('utcNow'), concat('P', parameters('tokenExpirationInDays'),'D')),
                             'signedIp', parameters('writerIpAddresses')[copyIndex('writerCopy')]
-                        )).serviceSasToken]"
+                        )).serviceSasToken)]"
             },
             "copy":{
                 "name": "writerCopy",

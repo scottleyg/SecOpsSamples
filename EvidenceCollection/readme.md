@@ -11,10 +11,12 @@ To deploy this:
 2. review the descriptions in the template.json parameters
 ```json
 {
-"parameters": {
+"parameters":  {
         "caseNumber": { 
-            "type": "int",
-            "metadata": { "description": "the case number you are working - this is used to tag all resources and generate a unique storage account name" }
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20,
+            "metadata": { "description": "the case identifier you are working - this is used to tag all resources and generate a unique storage account name" }
         },
         "adminName": {
             "type": "string",
@@ -29,6 +31,12 @@ To deploy this:
             "type": "string",
             "metadata": { "description": "the VM admin's source IP Address." }
         },
+        "allowAdminIpInKeyVault": {
+            "type": "bool",
+            // allow admin to connect to vault by public IP... balancing usability versus forcing login to VM.
+            "metadata": { "description": "Set this to true if you want your admin to be able to access Key Vault from Azure interfaces (az cli, portal, etc...) and not just from the VM" },
+            "defaultValue": false
+        },
         "writerIpAddresses": {
             "type": "array",
             "metadata": { "description": "If you are allowing a remote user to upload data, specify this address" }
@@ -38,8 +46,8 @@ To deploy this:
             "metadata": { "description": "If you are allowing a remote user to download data, specify this address" }
         },
         "utcNow":{
-            "type":"string",                // utcnow has to be in parameters
-            "defaultValue": "[utcNow('u')]" //  to generate the expiration of the SAS
+            "type":"string",
+            "defaultValue": "[utcNow('u')]"
         },
         "tokenExpirationInDays": {
             "type": "int",
@@ -84,7 +92,7 @@ To deploy this:
     "contentVersion": "1.0.0.0",
     "parameters": {
         "caseNumber": {
-            "value": 123987 
+            "value": "123986"
         },
         "adminName": {
             "value": "scottley"
@@ -94,6 +102,9 @@ To deploy this:
         },
         "adminIpAddress": {
             "value": "73.140.112.227"
+        },
+        "allowAdminIpInKeyVault": {
+            "value": true
         },
         "readerIpAddresses": {
             "value": ["73.140.112.227"]
