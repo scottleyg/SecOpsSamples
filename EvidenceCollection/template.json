@@ -643,7 +643,7 @@
                     "enabled": true
                 },
                 "contentType": "string",
-                "value": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))).primaryEndpoints.blob, 'evidence/', listServiceSas(variables('storageAccountName'), '2023-01-01', createObject(
+                "value": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))).primaryEndpoints.blob, 'evidence/?', listServiceSas(variables('storageAccountName'), '2023-01-01', createObject(
                             'signedResource','c',
                             'canonicalizedResource', concat('/blob/', variables('storageAccountName'), '/evidence'),
                             'signedPermission', 'rl',
@@ -672,7 +672,7 @@
                     "enabled": true
                 },
                 "contentType": "string",
-                "value": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))).primaryEndpoints.blob, 'evidence/', listServiceSas(variables('storageAccountName'), '2023-01-01', createObject(
+                "value": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))).primaryEndpoints.blob, 'evidence/?', listServiceSas(variables('storageAccountName'), '2023-01-01', createObject(
                             'signedResource','c',
                             'canonicalizedResource', concat('/blob/', variables('storageAccountName'), '/evidence'),
                             'signedPermission', 'acw',
