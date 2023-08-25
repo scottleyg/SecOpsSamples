@@ -3,7 +3,7 @@
     "contentVersion": "1.0.0.0",
     "parameters": {
         "caseNumber": {
-            "value": 123987
+            "value": "123987"
         },
         "adminName": {
             "value": null
