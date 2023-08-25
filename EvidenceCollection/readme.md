@@ -1,6 +1,6 @@
 # Evidence Collection Environment
 
-This environment is intended to be useful for when you have multiple investigators or external parties adding data for evaluation. Some key features (hopefully) implemented in this setup leverage the [Azure Storage legal hold](https://learn.microsoft.com/en-us/azure/storage/blobs/immutable-legal-hold-overview), [Azure Storage Diagnostic Logging](https://learn.microsoft.com/en-us/azure/storage/common/storage-analytics-logging) for validation of access by which parties, [Azure Key Vault diagnostic logging](https://learn.microsoft.com/en-us/azure/key-vault/general/logging?tabs=Vault) with the logs going to a Log Analytics workspace in the resource group. 
+This environment is intended to be useful for when you have multiple investigators or external parties adding data for evaluation. Some key features (hopefully) implemented in this setup leverage the [Azure Storage legal hold](https://learn.microsoft.com/en-us/azure/storage/blobs/immutable-legal-hold-overview), [Azure Storage analytics logging](https://learn.microsoft.com/en-us/azure/storage/common/storage-analytics-logging) for validation of access by which parties, [Azure Key Vault logging](https://learn.microsoft.com/en-us/azure/key-vault/general/logging?tabs=Vault) with the logs going to a Log Analytics workspace in the resource group. 
 
 ![Resource Layout of the deployed resources](./images/resourceView.png "Resource View")
 
