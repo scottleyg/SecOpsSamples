@@ -1,18 +1,29 @@
 param(
     [string]$azureRegion,
     [string]$templateFile = ".\template.json",
-    [string]$parametersFile = ".\parameters.json"
+    [string]$parametersFile = ".\parameters.json",
+    [switch]$deployingUserIsAdminUser
 )
 
 $script:ErrorActionPreference = 'Stop'
-[int]$caseNumber = [int]::Parse((ConvertFrom-Json (Get-Content -Raw $parametersFile)).parameters.caseNumber.value)
+[string]$deployingUserObjectId = (Get-AzAdUser -Filter "mail eq '$((Get-AzContext).Account.Id)' or userprincipalname eq '$((Get-AzContext).Account.Id)'").Id
+[hashtable]$templateParameterFileObject = ConvertFrom-Json (Get-Content -Raw $parametersFile) -AsHashtable
+[string]$caseNumber = $templateParameterFileObject.parameters.caseNumber.value
 [string]$rgName = "case-$caseNumber"
+
+if($deployingUserIsAdminUser.IsPresent){
+    $templateParameterFileObject.parameters.Add('adminUserObjectId', @{ value = $deployingUserObjectId })
+}
+
+[hashtable]$templateParametersObject = @{}
+$templateParameterFileObject.parameters.Keys | ForEach-Object { $templateParametersObject.Add($_, $templateParameterFileObject.parameters[$_].value) }
+
 Write-Host "|-|> Creating Resource Group $rgName in $azureRegion"
-New-AzResourceGroup -Name $rgName -Location $azureRegion -Tag @{ CaseNumber = $caseNumber }
+New-AzResourceGroup -Name $rgName -Location $azureRegion -Tag @{ CaseNumber = $caseNumber } | Out-Null
 Write-Host "|+|> Created ResourceGroup"
 
 Write-Host "|-|> Deploying templated resources - deployment name is $caseNumber"
-$deploymentResults = New-AzResourceGroupDeployment -Name $caseNumber -ResourceGroupName $rgName -TemplateFile $templateFile -TemplateParameterFile $parametersFile
+$deploymentResults = New-AzResourceGroupDeployment -Name $caseNumber -ResourceGroupName $rgName -TemplateFile $templateFile -TemplateParameterObject $templateParametersObject
 Write-Host "|+|> Deployment of templated resources complete"
 
 $storageAccountName = $deploymentResults.Outputs.storageAccountName.value
@@ -24,6 +35,7 @@ Get-AzStorageAccount -ResourceGroupName $rgName `
     | Add-AzRmStorageContainerLegalHold -ContainerName 'evidence' `
                                         -Tag $caseNumber `
                                         -AllowProtectedAppendWriteAll $true
+    | Out-Null
 
 Write-Host "|+|> Done setting Storage Container Legal Hold"
 

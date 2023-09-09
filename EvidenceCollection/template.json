@@ -21,7 +21,11 @@
             "type": "string",
             "metadata": { "description": "the VM admin's source IP Address." }
         },
-        "allowAdminIpInKeyVault": {
+        "adminUserObjectId":{
+            "type": "string",
+            "value": null
+        },
+        "allowAdminToAccessKeyVault": {
             "type": "bool",
             // allow admin to connect to vault by public IP... balancing usability versus forcing login to VM.
             "metadata": { "description": "Set this to true if you want your admin to be able to access Key Vault from Azure interfaces (az cli, portal, etc...) and not just from the VM" },
@@ -86,7 +90,7 @@
         "stgPepName": "[concat('stgpep-', parameters('caseNumber'))]",
         "kvPepName": "[concat('kvpep-', parameters('caseNumber'))]",
         "allIps": "[concat(parameters('readerIpAddresses'), parameters('writerIpAddresses'), array(parameters('adminIpAddress')))]",
-        "keyVaultAllowedIps": "[if(parameters('allowAdminIpInKeyVault'), array(createObject('value', parameters('adminIpAddress'))), createArray())]"
+        "keyVaultAllowedIps": "[if(parameters('allowAdminToAccessKeyVault'), array(createObject('value', parameters('adminIpAddress'))), createArray())]"
     },
     "resources": [
          {
@@ -404,20 +408,37 @@
                     "name": "standard"
                 },
                 "networkAcls": {
-                    "bypass": "None",
+                    "bypass": "AzureServices",
                     "defaultAction": "Deny",
                     "ipRules": "[variables('keyVaultAllowedIps')]",
-                    "virtualNetworkRules": "[if(parameters('allowAdminIpInKeyVault'), createArray(createObject('id', resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'default'), 'ignoreMissingVnetServiceEndpoint', false())), createArray())]"
+                    "virtualNetworkRules": "[if(parameters('allowAdminToAccessKeyVault'), createArray(createObject('id', resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'default'), 'ignoreMissingVnetServiceEndpoint', false())), createArray())]"
                 },
                 "tenantId": "[subscription().tenantId]",
                 "accessPolicies": [],
-                "enabledForDeployment": false,
+                "enabledForDeployment": true,
                 "enabledForDiskEncryption": false,
-                "enabledForTemplateDeployment": false,
+                "enabledForTemplateDeployment": false,  
                 "enableRbacAuthorization": true,
-                "publicNetworkAccess": "Disabled"
+                "enablePurgeProtection": true,
+                "softDeleteRetentionInDays": 90,
+                "publicNetworkAccess": "Enabled"
             }
         },
+        {
+        "type": "Microsoft.KeyVault/vaults/keys",
+        "apiVersion": "2021-11-01-preview",
+        "name": "[concat(variables('keyVaultName'), '/storageCmk')]",
+        "properties": {
+            "kty": "RSA",
+            "keyOps": [],
+            "keySize": 2048,
+            "curveName": ""
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "6b7f57ce-6c45-4161-9494-89d865319ab4"
+      ]
+    },
         {
             "name": "keyVaultDiag",
             "type": "Microsoft.Insights/diagnosticSettings",
@@ -485,7 +506,36 @@
             }
         },
         {
-            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
+            "type": "Microsoft.Authorization/roleAssignments",
+            "condition": "[parameters('allowAdminToAccessKeyVault')]",
+            "comments": "this adds the admin user as a secrets reader if the parameter to allow admin direct KV access is set",
+            "name": "d667156b-8fa9-4dcc-b299-7620ed4f61aa",
+            "apiVersion": "2022-04-01",
+            "dependsOn": [
+                "[variables('keyVaultName')]"
+            ],
+            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "properties": {
+                "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/4633458b-17de-408a-b874-0445c86b69e6",                        
+                "principalId": "[parameters('adminUserObjectId')]"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "comments": "this adds the admin user as a crypto operator to create the CMK key for storage",
+            "name": "6b7f57ce-6c45-4161-9494-89d865319ab4",
+            "apiVersion": "2022-04-01",
+            "dependsOn": [
+                "[variables('keyVaultName')]"
+            ],
+            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "properties": {
+                "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/14b46e9e-c2b7-41b4-b07b-48a6ebf60603",                        
+                "principalId": "[parameters('adminUserObjectId')]"
+            }
+        },
+        {
+            "condition": "[not(parameters('allowAdminToAccessKeyVault'))]",
             "type": "Microsoft.Network/privateDnsZones",
             "apiVersion": "2018-09-01",
             "name": "privatelink.vaultcore.azure.net",
@@ -504,7 +554,7 @@
             "properties": {}
         },
         {
-            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
+            "condition": "[not(parameters('allowAdminToAccessKeyVault'))]",
             "type": "Microsoft.Network/privateEndpoints",
             "apiVersion": "2021-05-01",
             "location": "[resourceGroup().location]",
@@ -557,7 +607,7 @@
             }
         },
         {
-            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
+            "condition": "[not(parameters('allowAdminToAccessKeyVault'))]",
             "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
             "apiVersion": "2018-09-01",
             "name": "[concat('privatelink.vaultcore.azure.net', '/', uniqueString(resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))))]",
@@ -588,7 +638,7 @@
             }
         },
         {
-            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
+            "condition": "[not(parameters('allowAdminToAccessKeyVault'))]",
             "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
             "apiVersion": "2021-05-01",
             "name": "[concat(variables('kvPepName'), '/', 'default')]",

@@ -31,7 +31,7 @@ To deploy this:
             "type": "string",
             "metadata": { "description": "the VM admin's source IP Address." }
         },
-        "allowAdminIpInKeyVault": {
+        "allowAdminToAccessKeyVault": {
             "type": "bool",
             // allow admin to connect to vault by public IP... balancing usability versus forcing login to VM.
             "metadata": { "description": "Set this to true if you want your admin to be able to access Key Vault from Azure interfaces (az cli, portal, etc...) and not just from the VM" },
@@ -103,7 +103,7 @@ To deploy this:
         "adminIpAddress": {
             "value": "73.140.112.227"
         },
-        "allowAdminIpInKeyVault": {
+        "allowAdminToAccessKeyVault": {
             "value": true
         },
         "readerIpAddresses": {
