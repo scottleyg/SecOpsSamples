@@ -3,7 +3,7 @@
     "contentVersion": "1.0.0.0",
     "parameters": {
         "caseNumber": {
-            "value": 123987
+            "value": "123987"
         },
         "adminName": {
             "value": null
@@ -14,10 +14,16 @@
         "adminIpAddress": {
             "value": null
         },
-        "readerIpAddresses": {
-            "value": []
+        "adminUserObjectId":{
+            "value": null
+        },
+        "allowAdminToAccessKeyVault": {
+            "value": false
         },
         "writerIpAddresses": {
+            "value": []
+        },
+        "readerIpAddresses": {
             "value": []
         }
     }

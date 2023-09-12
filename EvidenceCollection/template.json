@@ -21,7 +21,11 @@
             "type": "string",
             "metadata": { "description": "the VM admin's source IP Address." }
         },
-        "allowAdminIpInKeyVault": {
+        "adminUserObjectId":{
+            "type": "string",
+            "value": null
+        },
+        "allowAdminToAccessKeyVault": {
             "type": "bool",
             // allow admin to connect to vault by public IP... balancing usability versus forcing login to VM.
             "metadata": { "description": "Set this to true if you want your admin to be able to access Key Vault from Azure interfaces (az cli, portal, etc...) and not just from the VM" },
@@ -86,7 +90,7 @@
         "stgPepName": "[concat('stgpep-', parameters('caseNumber'))]",
         "kvPepName": "[concat('kvpep-', parameters('caseNumber'))]",
         "allIps": "[concat(parameters('readerIpAddresses'), parameters('writerIpAddresses'), array(parameters('adminIpAddress')))]",
-        "keyVaultAllowedIps": "[if(parameters('allowAdminIpInKeyVault'), array(createObject('value', parameters('adminIpAddress'))), createArray())]"
+        "keyVaultAllowedIps": "[if(parameters('allowAdminToAccessKeyVault'), array(createObject('value', parameters('adminIpAddress'))), createArray())]"
     },
     "resources": [
          {
@@ -206,17 +210,32 @@
             }
         },
         {
+            "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+            "apiVersion": "2023-01-31",
+            "name": "storageCmkIdentity",
+            "location": "[resourceGroup().location]",
+            "tags": "[resourceGroup().tags]"
+        },
+        {
             "comments": "This account could be trimmed down to just be a blob store... but... I'm lazy and it's Sunday.",
             "type": "Microsoft.Storage/storageAccounts",
             "apiVersion": "2023-01-01",
             "name": "[variables('storageAccountName')]",
             "location": "[resourceGroup().location]",
             "tags": "[resourceGroup().tags]",
+            "dependsOn":[ 
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'storageCmkIdentity')]",
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+            ],
             "sku": {
                 "name": "Standard_LRS",
                 "tier": "Standard"
             },
             "kind": "StorageV2",
+            "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": { "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'storageCmkIdentity')]": {} }
+            },
             "properties": {
                 "minimumTlsVersion": "TLS1_2",
                 "allowBlobPublicAccess": false,
@@ -227,7 +246,7 @@
                     "defaultAction": "Deny"
                 },
                 "supportsHttpsTrafficOnly": true,
-                "encryption": {
+                "encryption": {                    
                     "services": {
                         "file": {
                             "keyType": "Account",
@@ -238,7 +257,11 @@
                             "enabled": true
                         }
                     },
-                    "keySource": "Microsoft.Storage"
+                    "requireInfrastructureEncryption": true,
+                    "keySource": "Microsoft.Storage",
+                    "identity": {                      
+                        "userAssignedIdentity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'storageCmkIdentity')]"
+                    }
                 },
                 "accessTier": "Hot"
             }
@@ -404,18 +427,20 @@
                     "name": "standard"
                 },
                 "networkAcls": {
-                    "bypass": "None",
+                    "bypass": "AzureServices",
                     "defaultAction": "Deny",
                     "ipRules": "[variables('keyVaultAllowedIps')]",
-                    "virtualNetworkRules": "[if(parameters('allowAdminIpInKeyVault'), createArray(createObject('id', resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'default'), 'ignoreMissingVnetServiceEndpoint', false())), createArray())]"
+                    "virtualNetworkRules": "[if(parameters('allowAdminToAccessKeyVault'), createArray(createObject('id', resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'default'), 'ignoreMissingVnetServiceEndpoint', false())), createArray())]"
                 },
                 "tenantId": "[subscription().tenantId]",
                 "accessPolicies": [],
-                "enabledForDeployment": false,
+                "enabledForDeployment": true,
                 "enabledForDiskEncryption": false,
-                "enabledForTemplateDeployment": false,
+                "enabledForTemplateDeployment": false,  
                 "enableRbacAuthorization": true,
-                "publicNetworkAccess": "Disabled"
+                "enablePurgeProtection": true,
+                "softDeleteRetentionInDays": 90,
+                "publicNetworkAccess": "Enabled"
             }
         },
         {
@@ -485,7 +510,50 @@
             }
         },
         {
-            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
+            "type": "Microsoft.Authorization/roleAssignments",
+            "comments": "this deploys the storage UAID as key reader for the Key Vault",
+            "name": "52b22d0d-5797-42a0-bbc0-09e159ebb27e",
+            "apiVersion": "2022-04-01",
+            "dependsOn": [
+                "[variables('keyVaultName')]"
+            ],
+            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "properties": {
+                "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/12338af0-0e69-4776-bea7-57ae8d297424",                        
+                "principalId": "[reference('storageCmkIdentity', '2018-11-30', 'full').properties.principalId]"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "condition": "[parameters('allowAdminToAccessKeyVault')]",
+            "comments": "this adds the admin user as a secrets reader if the parameter to allow admin direct KV access is set",
+            "name": "d667156b-8fa9-4dcc-b299-7620ed4f61aa",
+            "apiVersion": "2022-04-01",
+            "dependsOn": [
+                "[variables('keyVaultName')]"
+            ],
+            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "properties": {
+                "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/4633458b-17de-408a-b874-0445c86b69e6",                        
+                "principalId": "[parameters('adminUserObjectId')]"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "comments": "this adds the admin user as a crypto operator to create the CMK key for storage",
+            "name": "6b7f57ce-6c45-4161-9494-89d865319ab4",
+            "apiVersion": "2022-04-01",
+            "dependsOn": [
+                "[variables('keyVaultName')]"
+            ],
+            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "properties": {
+                "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/14b46e9e-c2b7-41b4-b07b-48a6ebf60603",                        
+                "principalId": "[parameters('adminUserObjectId')]"
+            }
+        },
+        {
+            "condition": "[not(parameters('allowAdminToAccessKeyVault'))]",
             "type": "Microsoft.Network/privateDnsZones",
             "apiVersion": "2018-09-01",
             "name": "privatelink.vaultcore.azure.net",
@@ -504,7 +572,7 @@
             "properties": {}
         },
         {
-            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
+            "condition": "[not(parameters('allowAdminToAccessKeyVault'))]",
             "type": "Microsoft.Network/privateEndpoints",
             "apiVersion": "2021-05-01",
             "location": "[resourceGroup().location]",
@@ -557,7 +625,7 @@
             }
         },
         {
-            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
+            "condition": "[not(parameters('allowAdminToAccessKeyVault'))]",
             "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
             "apiVersion": "2018-09-01",
             "name": "[concat('privatelink.vaultcore.azure.net', '/', uniqueString(resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))))]",
@@ -588,7 +656,7 @@
             }
         },
         {
-            "condition": "[not(parameters('allowAdminIpInKeyVault'))]",
+            "condition": "[not(parameters('allowAdminToAccessKeyVault'))]",
             "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
             "apiVersion": "2021-05-01",
             "name": "[concat(variables('kvPepName'), '/', 'default')]",
@@ -711,6 +779,10 @@
         "sshConnectionCommand": {
             "type":"string",
             "value": "[concat('ssh -i <your-private-key-file> ', parameters('adminName'), '@', reference(variables('ipName'), '2022-09-01').ipAddress)]"
+        },
+        "storageCmkIdentity": {
+            "type": "string",
+            "value":"[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'storageCmkIdentity')]"
         }       
     }
 }
