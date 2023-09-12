@@ -210,17 +210,32 @@
             }
         },
         {
+            "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+            "apiVersion": "2023-01-31",
+            "name": "storageCmkIdentity",
+            "location": "[resourceGroup().location]",
+            "tags": "[resourceGroup().tags]"
+        },
+        {
             "comments": "This account could be trimmed down to just be a blob store... but... I'm lazy and it's Sunday.",
             "type": "Microsoft.Storage/storageAccounts",
             "apiVersion": "2023-01-01",
             "name": "[variables('storageAccountName')]",
             "location": "[resourceGroup().location]",
             "tags": "[resourceGroup().tags]",
+            "dependsOn":[ 
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'storageCmkIdentity')]",
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+            ],
             "sku": {
                 "name": "Standard_LRS",
                 "tier": "Standard"
             },
             "kind": "StorageV2",
+            "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": { "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'storageCmkIdentity')]": {} }
+            },
             "properties": {
                 "minimumTlsVersion": "TLS1_2",
                 "allowBlobPublicAccess": false,
@@ -231,7 +246,7 @@
                     "defaultAction": "Deny"
                 },
                 "supportsHttpsTrafficOnly": true,
-                "encryption": {
+                "encryption": {                    
                     "services": {
                         "file": {
                             "keyType": "Account",
@@ -242,7 +257,11 @@
                             "enabled": true
                         }
                     },
-                    "keySource": "Microsoft.Storage"
+                    "requireInfrastructureEncryption": true,
+                    "keySource": "Microsoft.Storage",
+                    "identity": {                      
+                        "userAssignedIdentity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'storageCmkIdentity')]"
+                    }
                 },
                 "accessTier": "Hot"
             }
@@ -425,21 +444,6 @@
             }
         },
         {
-        "type": "Microsoft.KeyVault/vaults/keys",
-        "apiVersion": "2021-11-01-preview",
-        "name": "[concat(variables('keyVaultName'), '/storageCmk')]",
-        "properties": {
-            "kty": "RSA",
-            "keyOps": [],
-            "keySize": 2048,
-            "curveName": ""
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-        "6b7f57ce-6c45-4161-9494-89d865319ab4"
-      ]
-    },
-        {
             "name": "keyVaultDiag",
             "type": "Microsoft.Insights/diagnosticSettings",
             "apiVersion": "2021-05-01-preview",
@@ -503,6 +507,20 @@
             "properties": {
                 "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/4633458b-17de-408a-b874-0445c86b69e6",                        
                 "principalId": "[reference(resourceId('Microsoft.Compute/virtualMachines', variables('vmName')), '2019-03-01', 'Full').identity.principalId]"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "comments": "this deploys the storage UAID as key reader for the Key Vault",
+            "name": "52b22d0d-5797-42a0-bbc0-09e159ebb27e",
+            "apiVersion": "2022-04-01",
+            "dependsOn": [
+                "[variables('keyVaultName')]"
+            ],
+            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "properties": {
+                "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/12338af0-0e69-4776-bea7-57ae8d297424",                        
+                "principalId": "[reference('storageCmkIdentity', '2018-11-30', 'full').properties.principalId]"
             }
         },
         {
@@ -761,6 +779,10 @@
         "sshConnectionCommand": {
             "type":"string",
             "value": "[concat('ssh -i <your-private-key-file> ', parameters('adminName'), '@', reference(variables('ipName'), '2022-09-01').ipAddress)]"
+        },
+        "storageCmkIdentity": {
+            "type": "string",
+            "value":"[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'storageCmkIdentity')]"
         }       
     }
 }

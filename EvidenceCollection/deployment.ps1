@@ -18,6 +18,9 @@ if($deployingUserIsAdminUser.IsPresent){
 [hashtable]$templateParametersObject = @{}
 $templateParameterFileObject.parameters.Keys | ForEach-Object { $templateParametersObject.Add($_, $templateParameterFileObject.parameters[$_].value) }
 
+Write-Host "|*|> Deployment Parameters"
+$templateParametersObject
+
 Write-Host "|-|> Creating Resource Group $rgName in $azureRegion"
 New-AzResourceGroup -Name $rgName -Location $azureRegion -Tag @{ CaseNumber = $caseNumber } | Out-Null
 Write-Host "|+|> Created ResourceGroup"
@@ -26,16 +29,35 @@ Write-Host "|-|> Deploying templated resources - deployment name is $caseNumber"
 $deploymentResults = New-AzResourceGroupDeployment -Name $caseNumber -ResourceGroupName $rgName -TemplateFile $templateFile -TemplateParameterObject $templateParametersObject
 Write-Host "|+|> Deployment of templated resources complete"
 
+Write-Host "|-|> Creating Storage CMK key in $($deploymentResults.Outputs.keyVaultName.value)"
+$keyVault = Get-AzKeyVault -VaultName $deploymentResults.Outputs.keyVaultName.value 
+$storageCmkKey = Get-AzKeyVaultKey -VaultName $deploymentResults.Outputs.keyVaultName.value -Name storageCmk
+if($null -eq $storageCmkKey) {
+    $storageCmkKey = Add-AzKeyVaultKey -VaultName $deploymentResults.Outputs.keyVaultName.value -Name storageCmk -Size 2048 -Destination Software
+}
+Write-Host "|+|> Done creating Storage CMK key $($storageCmkKey.Id)"
+
 $storageAccountName = $deploymentResults.Outputs.storageAccountName.value
-$rules = Get-AzStorageAccountNetworkRuleSet $rgName $storageAccountName
+$uaid = $deploymentResults.Outputs.storageCmkIdentity.value
+
+Write-Host "|-|> Setting the CMK for $storageAccountName"
+Set-AzStorageAccount -ResourceGroupName $rgName `
+    -AccountName $storageAccountName `
+    -IdentityType SystemAssignedUserAssigned `
+    -UserAssignedIdentityId $uaid `
+    -KeyvaultEncryption `
+    -KeyVaultUri $keyVault.VaultUri `
+    -KeyName $storageCmkKey.Name `
+    -KeyVersion "" `
+    -KeyVaultUserAssignedIdentityId $deploymentResults.Outputs.storageCmkIdentity.value
+Write-Host "|+|> Done setting CMK for $storageAccountName"    
 
 Write-Host "|-|> Setting Storage Container Legal Hold"
-Get-AzStorageAccount -ResourceGroupName $rgName `
-                     -AccountName $storageAccountName `
-    | Add-AzRmStorageContainerLegalHold -ContainerName 'evidence' `
-                                        -Tag $caseNumber `
-                                        -AllowProtectedAppendWriteAll $true
-    | Out-Null
+$storageAccount = Get-AzStorageAccount -ResourceGroupName $rgName -AccountName $storageAccountName 
+Add-AzRmStorageContainerLegalHold -StorageAccount $storageAccount `
+                                  -ContainerName 'evidence' `
+                                  -Tag $caseNumber `
+                                  -AllowProtectedAppendWriteAll $true | Out-Null
 
 Write-Host "|+|> Done setting Storage Container Legal Hold"
 
@@ -45,6 +67,7 @@ $allowedIpRules = $deploymentResults.outputs.ipsToAllowInStorage.value | Select-
     new-object -type Microsoft.Azure.Commands.Management.Storage.Models.PSIpRule -Property @{ Action= 'Allow' ; IpAddressOrRange = $_ } 
 }
 
+$rules = Get-AzStorageAccountNetworkRuleSet $rgName $storageAccountName
 Update-AzStorageAccountNetworkRuleSet $rgName $storageAccountName `
             -Bypass $rules.Bypass `
             -DefaultAction $rules.DefaultAction `
@@ -70,4 +93,9 @@ Write-Host "    Use AZ CLI from the VM to get SAS tokens by signing in with the 
 Write-Host "        bash$ az login --identity"
 Write-Host "        bash$ az keyvault secret list --id $($deploymentResults.Outputs.keyVaultUri.value)"
 Write-Host "        bash$ az keyvault secret show --id $($deploymentResults.Outputs.keyVaultUri.value)secrets/reader-100-200-30-40"
+Write-Host "Cleanup Info:"
+Write-Host " To remove Storage Accounts you must remove the legal hold, execute the following PowerShell to remove the hold:"
+Write-Host " PS> Remove-AzRmStorageContainerLegalHold -ContainerName 'evidence' ``"
+Write-Host "   -Tag $caseNumber -ResourceGroupName '$rgName' ``"
+Write-Host "   -StorageAccountName $($deploymentResults.Outputs.storageAccountName.value)"
 Write-Host "================================================================================================================="
