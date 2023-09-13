@@ -26,15 +26,40 @@ New-AzResourceGroup -Name $rgName -Location $azureRegion -Tag @{ CaseNumber = $c
 Write-Host "|+|> Created ResourceGroup"
 
 Write-Host "|-|> Deploying templated resources - deployment name is $caseNumber"
-$deploymentResults = New-AzResourceGroupDeployment -Name $caseNumber -ResourceGroupName $rgName -TemplateFile $templateFile -TemplateParameterObject $templateParametersObject
+try {
+    $deploymentResults = New-AzResourceGroupDeployment -Name $caseNumber -ResourceGroupName $rgName -TemplateFile $templateFile -TemplateParameterObject $templateParametersObject
+} catch {
+    if($_ -match 'Code:VirtualNetworkNotValid'){
+        Write-Warning "|!|> Retry-able error during deployment, retrying the resource group deployment"
+        $deploymentResults = New-AzResourceGroupDeployment -Name $caseNumber -ResourceGroupName $rgName -TemplateFile $templateFile -TemplateParameterObject $templateParametersObject
+    }
+}
 Write-Host "|+|> Deployment of templated resources complete"
 
+function getOrCreateKey([string]$keyVaultName) { 
+    $storageCmkKey = Get-AzKeyVaultKey -VaultName $keyVaultName -Name storageCmk
+    if($null -eq $storageCmkKey) {
+        $storageCmkKey = Add-AzKeyVaultKey -VaultName $keyVaultName -Name storageCmk -Size 2048 -Destination Software
+    }
+    return $storageCmkKey
+}
 Write-Host "|-|> Creating Storage CMK key in $($deploymentResults.Outputs.keyVaultName.value)"
 $keyVault = Get-AzKeyVault -VaultName $deploymentResults.Outputs.keyVaultName.value 
-$storageCmkKey = Get-AzKeyVaultKey -VaultName $deploymentResults.Outputs.keyVaultName.value -Name storageCmk
-if($null -eq $storageCmkKey) {
-    $storageCmkKey = Add-AzKeyVaultKey -VaultName $deploymentResults.Outputs.keyVaultName.value -Name storageCmk -Size 2048 -Destination Software
+try {
+    $storageCmkKey = getOrCreateKey $deploymentResults.Outputs.keyVaultName.value
+} catch {
+    [Regex]$clientIpRegex = 'Client address:\s*([^\s+]+)[\s\r\n]*';
+    $clientIpMatch = $clientIpRegex.Match($_);
+    if($clientIpMatch.Success) {
+        $clientIp = $clientIpMatch.Groups[1].Value
+        Write-Warning "|!|> script host is not in IP Allow list in Key Vault... adding $clientIp to create CMK key... network rule will be removed... maybe..."
+        $keyVault | Add-AzKeyVaultNetworkRule -IpAddressRange "$clientIp/32" -PassThru | Out-Null
+        $storageCmkKey = getOrCreateKey $deploymentResults.Outputs.keyVaultName.value
+        $keyVault | Remove-AzKeyVaultNetworkRule -IpAddressRange "$clientIp/32" -PassThru | Out-Null
+    }    
 }
+
+
 Write-Host "|+|> Done creating Storage CMK key $($storageCmkKey.Id)"
 
 $storageAccountName = $deploymentResults.Outputs.storageAccountName.value
