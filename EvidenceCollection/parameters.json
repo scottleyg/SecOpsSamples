@@ -14,10 +14,16 @@
         "adminIpAddress": {
             "value": null
         },
-        "readerIpAddresses": {
-            "value": []
+        "adminUserObjectId":{
+            "value": null
+        },
+        "allowAdminToAccessKeyVault": {
+            "value": false
         },
         "writerIpAddresses": {
+            "value": []
+        },
+        "readerIpAddresses": {
             "value": []
         }
     }

@@ -1,6 +1,6 @@
 # Evidence Collection Environment
 
-This environment is intended to be useful for when you have multiple investigators or external parties adding data for evaluation. Some key features (hopefully) implemented in this setup leverage the [Azure Storage legal hold](https://learn.microsoft.com/en-us/azure/storage/blobs/immutable-legal-hold-overview), [Azure Storage Diagnostic Logging](https://learn.microsoft.com/en-us/azure/storage/common/storage-analytics-logging) for validation of access by which parties, [Azure Key Vault diagnostic logging](https://learn.microsoft.com/en-us/azure/key-vault/general/logging?tabs=Vault) with the logs going to a Log Analytics workspace in the resource group. 
+This environment is intended to be useful for when you have multiple investigators or external parties adding data for evaluation. Some key features (hopefully) implemented in this setup leverage the [Azure Storage legal hold](https://learn.microsoft.com/en-us/azure/storage/blobs/immutable-legal-hold-overview), [Azure Storage analytics logging](https://learn.microsoft.com/en-us/azure/storage/common/storage-analytics-logging) for validation of access by which parties, [Azure Key Vault logging](https://learn.microsoft.com/en-us/azure/key-vault/general/logging?tabs=Vault) with the logs going to a Log Analytics workspace in the resource group. 
 
 ![Resource Layout of the deployed resources](./images/resourceView.png "Resource View")
 
@@ -31,7 +31,7 @@ To deploy this:
             "type": "string",
             "metadata": { "description": "the VM admin's source IP Address." }
         },
-        "allowAdminIpInKeyVault": {
+        "allowAdminToAccessKeyVault": {
             "type": "bool",
             // allow admin to connect to vault by public IP... balancing usability versus forcing login to VM.
             "metadata": { "description": "Set this to true if you want your admin to be able to access Key Vault from Azure interfaces (az cli, portal, etc...) and not just from the VM" },
@@ -103,7 +103,7 @@ To deploy this:
         "adminIpAddress": {
             "value": "73.140.112.227"
         },
-        "allowAdminIpInKeyVault": {
+        "allowAdminToAccessKeyVault": {
             "value": true
         },
         "readerIpAddresses": {
