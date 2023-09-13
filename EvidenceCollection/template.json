@@ -85,13 +85,41 @@
         "logAnalyticsName": "[concat('la-', parameters('caseNumber'))]",
         "nicName": "[concat('nic-', parameters('caseNumber'))]",
         "nsgName": "[concat('nsg-', parameters('caseNumber'))]",
-        "vmName": "[concat('vm-', parameters('caseNumber'))]",
+        "vmName": "[uniqueString('vm-', parameters('caseNumber'), resourceGroup().id)]",
         "vnetName": "[concat('vnet-', parameters('caseNumber'))]",
         "stgPepName": "[concat('stgpep-', parameters('caseNumber'))]",
         "kvPepName": "[concat('kvpep-', parameters('caseNumber'))]",
         "allIps": "[concat(parameters('readerIpAddresses'), parameters('writerIpAddresses'), array(parameters('adminIpAddress')))]",
-        "keyVaultAllowedIps": "[if(parameters('allowAdminToAccessKeyVault'), array(createObject('value', parameters('adminIpAddress'))), createArray())]"
+        "keyVaultAllowedIps": "[if(parameters('allowAdminToAccessKeyVault'), array(createObject('value', parameters('adminIpAddress'))), createArray())]",
+        "cmkStorageIdentityRoleAssignementName": "[rbac.assignmentName('14b46e9e-c2b7-41b4-b07b-48a6ebf60603', resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), parameters('adminUserObjectId'))]"
     },
+    "functions":[
+        {
+            "namespace": "rbac",
+            "members": {
+                "assignmentName": {
+                    "parameters": [
+                        {
+                            "name": "roleDefinitionId",
+                            "type": "string"
+                        },
+                        {
+                            "name": "scope",
+                            "type": "string"
+                        },
+                        {
+                            "name": "principal",
+                            "type": "string"
+                        }
+                    ],
+                    "output": {
+                        "value": "[guid(parameters('roleDefinitionId'), parameters('scope'), parameters('principal'))]",
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    ],
     "resources": [
          {
             "apiVersion": "2017-03-15-preview",
@@ -224,8 +252,9 @@
             "location": "[resourceGroup().location]",
             "tags": "[resourceGroup().tags]",
             "dependsOn":[ 
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'storageCmkIdentity')]",
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+                "storageCmkIdentity",
+                "[variables('keyVaultName')]",
+                "[variables('cmkStorageIdentityRoleAssignementName')]"
             ],
             "sku": {
                 "name": "Standard_LRS",
@@ -271,7 +300,7 @@
             "apiVersion": "2023-01-01",
             "name": "[concat(variables('storageAccountName'), '/default')]",
             "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+                "[variables('storageAccountName')]"
             ],
             "sku": {
                 "name": "Standard_LRS",
@@ -292,8 +321,7 @@
             "apiVersion": "2023-01-01",
             "name": "[concat(variables('storageAccountName'), '/default/evidence')]",
             "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]",
-                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
             ],
             "properties": {
                 "immutableStorageWithVersioning": {
@@ -311,8 +339,8 @@
             "location": "[resourceGroup().location]",
             "tags": "[resourceGroup().tags]",
             "dependsOn": [
-                "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]",
-                "[resourceId('Microsoft.Storage/StorageAccounts', variables('storageAccountName'))]"
+                "[variables('nicName')]",
+                "[variables('storageAccountName')]"
             ],
             "identity": {
                 "type": "SystemAssigned"
@@ -381,9 +409,9 @@
             "location": "[resourceGroup().location]",
             "tags": "[resourceGroup().tags]",
             "dependsOn": [
-                "[resourceId('Microsoft.Network/publicIPAddresses', variables('ipName'))]",
+                "[variables('ipName')]",
                 "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'default')]",
-                "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+                "[variables('nsgName')]"
             ],
             "kind": "Regular",
             "properties": {
@@ -497,27 +525,27 @@
         },        
         {
             "type": "Microsoft.Authorization/roleAssignments",
-            "comments": "this deploys the VM Identity as secrets reader for the Key Vault",
-            "name": "1ae0497f-dec2-4d70-8126-116358bb8540",
+            "comments": "this deploys the VM Identity as secrets reader for the Key Vault.",            
+            "name": "[rbac.assignmentName('4633458b-17de-408a-b874-0445c86b69e6', resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), variables('vmName'))]",
             "apiVersion": "2022-04-01",
             "dependsOn": [
                 "[variables('keyVaultName')]"
             ],
-            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
             "properties": {
                 "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/4633458b-17de-408a-b874-0445c86b69e6",                        
-                "principalId": "[reference(resourceId('Microsoft.Compute/virtualMachines', variables('vmName')), '2019-03-01', 'Full').identity.principalId]"
+                "principalId": "[reference(variables('vmName'), '2019-03-01', 'Full').identity.principalId]"
             }
         },
         {
             "type": "Microsoft.Authorization/roleAssignments",
             "comments": "this deploys the storage UAID as key reader for the Key Vault",
-            "name": "52b22d0d-5797-42a0-bbc0-09e159ebb27e",
+            "name": "[rbac.assignmentName('12338af0-0e69-4776-bea7-57ae8d297424', resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), 'storageCmkIdentity')]",
             "apiVersion": "2022-04-01",
             "dependsOn": [
                 "[variables('keyVaultName')]"
             ],
-            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
             "properties": {
                 "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/12338af0-0e69-4776-bea7-57ae8d297424",                        
                 "principalId": "[reference('storageCmkIdentity', '2018-11-30', 'full').properties.principalId]"
@@ -527,12 +555,12 @@
             "type": "Microsoft.Authorization/roleAssignments",
             "condition": "[parameters('allowAdminToAccessKeyVault')]",
             "comments": "this adds the admin user as a secrets reader if the parameter to allow admin direct KV access is set",
-            "name": "d667156b-8fa9-4dcc-b299-7620ed4f61aa",
+            "name": "[rbac.assignmentName('4633458b-17de-408a-b874-0445c86b69e6', resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), parameters('adminUserObjectId'))]",
             "apiVersion": "2022-04-01",
             "dependsOn": [
                 "[variables('keyVaultName')]"
             ],
-            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
             "properties": {
                 "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/4633458b-17de-408a-b874-0445c86b69e6",                        
                 "principalId": "[parameters('adminUserObjectId')]"
@@ -541,12 +569,12 @@
         {
             "type": "Microsoft.Authorization/roleAssignments",
             "comments": "this adds the admin user as a crypto operator to create the CMK key for storage",
-            "name": "6b7f57ce-6c45-4161-9494-89d865319ab4",
+             "name": "[variables('cmkStorageIdentityRoleAssignementName')]",
             "apiVersion": "2022-04-01",
             "dependsOn": [
                 "[variables('keyVaultName')]"
             ],
-            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
             "properties": {
                 "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/14b46e9e-c2b7-41b4-b07b-48a6ebf60603",                        
                 "principalId": "[parameters('adminUserObjectId')]"
