@@ -7,6 +7,10 @@ param(
 
 $script:ErrorActionPreference = 'Stop'
 [string]$deployingUserObjectId = (Get-AzAdUser -Filter "mail eq '$((Get-AzContext).Account.Id)' or userprincipalname eq '$((Get-AzContext).Account.Id)'").Id
+if([string]::IsNullOrWhitespace($deployingUserObjectId)){
+    Write-Error "Unable to identify user principal for currently logged in user. Please make sure you sign into Azure and Select the appropriate Subscription. If you're running in Cloud Shell, you will need to run:$([Environment]::NewLine)PS> Login-AzAccount -UseDeviceAuthentication"
+}
+
 [hashtable]$templateParameterFileObject = ConvertFrom-Json (Get-Content -Raw $parametersFile) -AsHashtable
 [string]$caseNumber = $templateParameterFileObject.parameters.caseNumber.value
 [string]$rgName = "case-$caseNumber"
@@ -44,6 +48,7 @@ function getOrCreateKey([string]$keyVaultName) {
     return $storageCmkKey
 }
 Write-Host "|-|> Creating Storage CMK key in $($deploymentResults.Outputs.keyVaultName.value)"
+
 $keyVault = Get-AzKeyVault -VaultName $deploymentResults.Outputs.keyVaultName.value 
 try {
     $storageCmkKey = getOrCreateKey $deploymentResults.Outputs.keyVaultName.value
