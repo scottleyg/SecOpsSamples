@@ -58,6 +58,7 @@ function getOrCreateKey([string]$keyVaultName) {
 Write-Host "|-|> Creating Storage CMK key in $($deploymentResults.Outputs.keyVaultName.value)"
 
 try {
+    $roleAssignment = New-AzRoleAssignment -ResourceGroupName $rgName -object $adminObjectId -RoleDefinitionId "14b46e9e-c2b7-41b4-b07b-48a6ebf60603" | Out-Null
     $storageCmkKey = getOrCreateKey $deploymentResults.Outputs.keyVaultName.value
 } catch {
     [Regex]$clientIpRegex = 'Client address:\s*([^\s+]+)[\s\r\n]*';
@@ -69,6 +70,10 @@ try {
         $storageCmkKey = getOrCreateKey $deploymentResults.Outputs.keyVaultName.value
         $keyVault | Remove-AzKeyVaultNetworkRule -IpAddressRange "$clientIp/32" -PassThru | Out-Null
     }    
+} finally {
+    if($null -ne $roleAssignment) {
+        Remove-AzRoleAssignment $roleAssignment | Out-Null
+    }
 }
 
 Write-Host "|+|> Done creating Storage CMK key $($storageCmkKey.Id)"
