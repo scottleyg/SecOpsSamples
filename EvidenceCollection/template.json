@@ -567,20 +567,6 @@
             }
         },
         {
-            "type": "Microsoft.Authorization/roleAssignments",
-            "comments": "this adds the admin user as a crypto operator to create the CMK key for storage",
-             "name": "[variables('cmkStorageIdentityRoleAssignementName')]",
-            "apiVersion": "2022-04-01",
-            "dependsOn": [
-                "[variables('keyVaultName')]"
-            ],
-            "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-            "properties": {
-                "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/14b46e9e-c2b7-41b4-b07b-48a6ebf60603",                        
-                "principalId": "[parameters('adminUserObjectId')]"
-            }
-        },
-        {
             "condition": "[not(parameters('allowAdminToAccessKeyVault'))]",
             "type": "Microsoft.Network/privateDnsZones",
             "apiVersion": "2018-09-01",
