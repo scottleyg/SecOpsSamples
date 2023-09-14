@@ -17,7 +17,7 @@ $templateParameterFileObject.parameters.Keys | ForEach-Object { $templateParamet
 if([string]::IsNullOrWhitespace($adminUserObjectId)) {
     $adminUserObjectId = (Get-AzAdUser -Filter "mail eq '$((Get-AzContext).Account.Id)' or userprincipalname eq '$((Get-AzContext).Account.Id)'").Id
     if($deployingUserIsAdminUser.IsPresent){
-        $templateParametersObject.parameters.Add('adminUserObjectId', $adminUserObjectId)
+        $templateParametersObject['adminUserObjectId'] = $adminUserObjectId
     }
 }
 if([string]::IsNullOrWhitespace($adminUserObjectId)){
@@ -43,7 +43,7 @@ try {
         Write-Warning "|!|> Retry-able error during deployment, retrying the resource group deployment"
         $deploymentResults = New-AzResourceGroupDeployment -Name $caseNumber -ResourceGroupName $rgName -TemplateFile $templateFile -TemplateParameterObject $templateParametersObject
     } else { 
-        throw $_
+        throw
     }
 }
 Write-Host "|+|> Deployment of templated resources complete"
@@ -56,9 +56,9 @@ function getOrCreateKey([string]$keyVaultName) {
     return $storageCmkKey
 }
 Write-Host "|-|> Creating Storage CMK key in $($deploymentResults.Outputs.keyVaultName.value)"
-
+$keyVault = Get-AzKeyVault -VaultName $deploymentResults.Outputs.keyVaultName.value -ResourceGroupName $rgName
 try {
-    $roleAssignment = New-AzRoleAssignment -ResourceGroupName $rgName -object $adminObjectId -RoleDefinitionId "14b46e9e-c2b7-41b4-b07b-48a6ebf60603" | Out-Null
+    $roleAssignment = New-AzRoleAssignment -Scope $keyVault.ResourceId -objectId $adminUserObjectId -RoleDefinitionId "14b46e9e-c2b7-41b4-b07b-48a6ebf60603"
     $storageCmkKey = getOrCreateKey $deploymentResults.Outputs.keyVaultName.value
 } catch {
     [Regex]$clientIpRegex = 'Client address:\s*([^\s+]+)[\s\r\n]*';
@@ -69,7 +69,9 @@ try {
         $keyVault | Add-AzKeyVaultNetworkRule -IpAddressRange "$clientIp/32" -PassThru | Out-Null
         $storageCmkKey = getOrCreateKey $deploymentResults.Outputs.keyVaultName.value
         $keyVault | Remove-AzKeyVaultNetworkRule -IpAddressRange "$clientIp/32" -PassThru | Out-Null
-    }    
+    } else {
+        throw
+    }
 } finally {
     if($null -ne $roleAssignment) {
         Remove-AzRoleAssignment $roleAssignment | Out-Null
@@ -90,10 +92,11 @@ Set-AzStorageAccount -ResourceGroupName $rgName `
     -KeyVaultUri $keyVault.VaultUri `
     -KeyName $storageCmkKey.Name `
     -KeyVersion "" `
-    -KeyVaultUserAssignedIdentityId $deploymentResults.Outputs.storageCmkIdentity.value
+    -KeyVaultUserAssignedIdentityId $deploymentResults.Outputs.storageCmkIdentity.value | Out-Null
 Write-Host "|+|> Done setting CMK for $storageAccountName"    
 
-Write-Host "|-|> Setting Storage Container Legal Hold"
+while($caseNumber.Length -lt 4) { $caseNumber = "0$caseNumber" }
+Write-Host "|-|> Setting Storage Container Legal Hold with tag $caseNumber"
 $storageAccount = Get-AzStorageAccount -ResourceGroupName $rgName -AccountName $storageAccountName 
 Add-AzRmStorageContainerLegalHold -StorageAccount $storageAccount `
                                   -ContainerName 'evidence' `

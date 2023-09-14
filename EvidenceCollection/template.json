@@ -90,8 +90,7 @@
         "stgPepName": "[concat('stgpep-', parameters('caseNumber'))]",
         "kvPepName": "[concat('kvpep-', parameters('caseNumber'))]",
         "allIps": "[concat(parameters('readerIpAddresses'), parameters('writerIpAddresses'), array(parameters('adminIpAddress')))]",
-        "keyVaultAllowedIps": "[if(parameters('allowAdminToAccessKeyVault'), array(createObject('value', parameters('adminIpAddress'))), createArray())]",
-        "cmkStorageIdentityRoleAssignementName": "[rbac.assignmentName('14b46e9e-c2b7-41b4-b07b-48a6ebf60603', resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), parameters('adminUserObjectId'))]"
+        "keyVaultAllowedIps": "[if(parameters('allowAdminToAccessKeyVault'), array(createObject('value', parameters('adminIpAddress'))), createArray())]"
     },
     "functions":[
         {
@@ -253,8 +252,7 @@
             "tags": "[resourceGroup().tags]",
             "dependsOn":[ 
                 "storageCmkIdentity",
-                "[variables('keyVaultName')]",
-                "[variables('cmkStorageIdentityRoleAssignementName')]"
+                "[variables('keyVaultName')]"
             ],
             "sku": {
                 "name": "Standard_LRS",
