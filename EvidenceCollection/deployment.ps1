@@ -6,24 +6,30 @@ param(
 )
 
 $script:ErrorActionPreference = 'Stop'
-[string]$deployingUserObjectId = (Get-AzAdUser -Filter "mail eq '$((Get-AzContext).Account.Id)' or userprincipalname eq '$((Get-AzContext).Account.Id)'").Id
-if([string]::IsNullOrWhitespace($deployingUserObjectId)){
-    Write-Error "Unable to identify user principal for currently logged in user. Please make sure you sign into Azure and Select the appropriate Subscription. If you're running in Cloud Shell, you will need to run:$([Environment]::NewLine)PS> Login-AzAccount -UseDeviceAuthentication"
-}
 
+#flatten the parameter file cuz we use it like an object...
 [hashtable]$templateParameterFileObject = ConvertFrom-Json (Get-Content -Raw $parametersFile) -AsHashtable
-[string]$caseNumber = $templateParameterFileObject.parameters.caseNumber.value
-[string]$rgName = "case-$caseNumber"
-
-if($deployingUserIsAdminUser.IsPresent){
-    $templateParameterFileObject.parameters.Add('adminUserObjectId', @{ value = $deployingUserObjectId })
-}
-
 [hashtable]$templateParametersObject = @{}
 $templateParameterFileObject.parameters.Keys | ForEach-Object { $templateParametersObject.Add($_, $templateParameterFileObject.parameters[$_].value) }
 
+# try to get the admin user object id from the parameters
+[string]$adminUserObjectId = $templateParametersObject['adminUserObjectId']
+if([string]::IsNullOrWhitespace($adminUserObjectId)) {
+    $adminUserObjectId = (Get-AzAdUser -Filter "mail eq '$((Get-AzContext).Account.Id)' or userprincipalname eq '$((Get-AzContext).Account.Id)'").Id
+    if($deployingUserIsAdminUser.IsPresent){
+        $templateParametersObject.parameters.Add('adminUserObjectId', $adminUserObjectId)
+    }
+}
+if([string]::IsNullOrWhitespace($adminUserObjectId)){
+    Write-Error "Unable to identify user principal for currently logged in user. Either add adminUserObjectId Paramter to your parameter file or please make sure you sign into Azure and Select the appropriate Subscription. If you're running in Cloud Shell, you will need to run:$([Environment]::NewLine)PS> Login-AzAccount -UseDeviceAuthentication"
+}
+
+
 Write-Host "|*|> Deployment Parameters"
 $templateParametersObject
+
+[string]$caseNumber = $templateParameterFileObject.parameters.caseNumber.value
+[string]$rgName = "case-$caseNumber"
 
 Write-Host "|-|> Creating Resource Group $rgName in $azureRegion"
 New-AzResourceGroup -Name $rgName -Location $azureRegion -Tag @{ CaseNumber = $caseNumber } | Out-Null
@@ -36,6 +42,8 @@ try {
     if($_ -match 'Code:VirtualNetworkNotValid'){
         Write-Warning "|!|> Retry-able error during deployment, retrying the resource group deployment"
         $deploymentResults = New-AzResourceGroupDeployment -Name $caseNumber -ResourceGroupName $rgName -TemplateFile $templateFile -TemplateParameterObject $templateParametersObject
+    } else { 
+        throw $_
     }
 }
 Write-Host "|+|> Deployment of templated resources complete"
@@ -49,7 +57,6 @@ function getOrCreateKey([string]$keyVaultName) {
 }
 Write-Host "|-|> Creating Storage CMK key in $($deploymentResults.Outputs.keyVaultName.value)"
 
-$keyVault = Get-AzKeyVault -VaultName $deploymentResults.Outputs.keyVaultName.value 
 try {
     $storageCmkKey = getOrCreateKey $deploymentResults.Outputs.keyVaultName.value
 } catch {
@@ -63,7 +70,6 @@ try {
         $keyVault | Remove-AzKeyVaultNetworkRule -IpAddressRange "$clientIp/32" -PassThru | Out-Null
     }    
 }
-
 
 Write-Host "|+|> Done creating Storage CMK key $($storageCmkKey.Id)"
 
