@@ -16,12 +16,14 @@ $templateParameterFileObject.parameters.Keys | ForEach-Object { $templateParamet
 if([string]::IsNullOrWhitespace($adminUserObjectId)) {
     $ctxAccountId = (Get-AzContext).Account.Id
     $adminUserObjectId = (Get-AzAdUser -Filter "mail eq '$ctxAccountId' or userprincipalname eq '$ctxAccountId'").Id
+    if([string]::IsNullOrWhitespace($adminUserObjectId) -and -not $null -eq (Get-Command az)) {
+        $adminUserObjectId= az ad signed-in-user show --query id --out tsv
+    }
     $templateParametersObject['adminUserObjectId'] = $adminUserObjectId
 }
 if([string]::IsNullOrWhitespace($adminUserObjectId)){
     Write-Error "Unable to identify user principal for currently logged in user. Either add adminUserObjectId Paramter to your parameter file or please make sure you sign into Azure and Select the appropriate Subscription. If you're running in Cloud Shell, you will need to run:$([Environment]::NewLine)PS> Login-AzAccount -UseDeviceAuthentication"
 }
-
 
 Write-Host "|*|> Deployment Parameters"
 $templateParametersObject
