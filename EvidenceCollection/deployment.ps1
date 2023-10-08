@@ -1,8 +1,7 @@
 param(
     [string]$azureRegion,
     [string]$templateFile = ".\template.json",
-    [string]$parametersFile = ".\parameters.json",
-    [switch]$deployingUserIsAdminUser
+    [string]$parametersFile = ".\parameters.json"    
 )
 
 $script:ErrorActionPreference = 'Stop'
@@ -15,10 +14,9 @@ $templateParameterFileObject.parameters.Keys | ForEach-Object { $templateParamet
 # try to get the admin user object id from the parameters
 [string]$adminUserObjectId = $templateParametersObject['adminUserObjectId']
 if([string]::IsNullOrWhitespace($adminUserObjectId)) {
-    $adminUserObjectId = (Get-AzAdUser -Filter "mail eq '$((Get-AzContext).Account.Id)' or userprincipalname eq '$((Get-AzContext).Account.Id)'").Id
-    if($deployingUserIsAdminUser.IsPresent){
-        $templateParametersObject['adminUserObjectId'] = $adminUserObjectId
-    }
+    $ctxAccountId = (Get-AzContext).Account.Id
+    $adminUserObjectId = (Get-AzAdUser -Filter "mail eq '$ctxAccountId' or userprincipalname eq '$ctxAccountId'").Id
+    $templateParametersObject['adminUserObjectId'] = $adminUserObjectId
 }
 if([string]::IsNullOrWhitespace($adminUserObjectId)){
     Write-Error "Unable to identify user principal for currently logged in user. Either add adminUserObjectId Paramter to your parameter file or please make sure you sign into Azure and Select the appropriate Subscription. If you're running in Cloud Shell, you will need to run:$([Environment]::NewLine)PS> Login-AzAccount -UseDeviceAuthentication"
@@ -139,7 +137,8 @@ Write-Host "        bash$ az keyvault secret list --id $($deploymentResults.Outp
 Write-Host "        bash$ az keyvault secret show --id $($deploymentResults.Outputs.keyVaultUri.value)secrets/reader-100-200-30-40"
 Write-Host "Cleanup Info:"
 Write-Host " To remove Storage Accounts you must remove the legal hold, execute the following PowerShell to remove the hold:"
+Write-Host " PS> `$acct=Get-AzStorageAccount | ? { `$_.Tags.CaseNumber -eq $caseNumber }  "
 Write-Host " PS> Remove-AzRmStorageContainerLegalHold -ContainerName 'evidence' ``"
 Write-Host "   -Tag $caseNumber -ResourceGroupName '$rgName' ``"
-Write-Host "   -StorageAccountName $($deploymentResults.Outputs.storageAccountName.value)"
+Write-Host "   -StorageAccountName `$acct.StorageAccountName"
 Write-Host "================================================================================================================="
