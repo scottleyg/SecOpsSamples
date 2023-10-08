@@ -39,7 +39,7 @@ Write-Host "|-|> Deploying templated resources - deployment name is $caseNumber"
 try {
     $deploymentResults = New-AzResourceGroupDeployment -Name $caseNumber -ResourceGroupName $rgName -TemplateFile $templateFile -TemplateParameterObject $templateParametersObject
 } catch {
-    if($_ -match 'Code:VirtualNetworkNotValid'){
+    if($_ -match 'Code:VirtualNetworkNotValid' -or $_ -match 'Code:PrincipalNotFound'){
         Write-Warning "|!|> Retry-able error during deployment, retrying the resource group deployment"
         $deploymentResults = New-AzResourceGroupDeployment -Name $caseNumber -ResourceGroupName $rgName -TemplateFile $templateFile -TemplateParameterObject $templateParametersObject
     } else { 
