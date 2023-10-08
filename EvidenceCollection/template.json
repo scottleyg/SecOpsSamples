@@ -89,6 +89,7 @@
         "vnetName": "[concat('vnet-', parameters('caseNumber'))]",
         "stgPepName": "[concat('stgpep-', parameters('caseNumber'))]",
         "kvPepName": "[concat('kvpep-', parameters('caseNumber'))]",
+        "osDiskName": "[concat(parameters('caseNumber'), '_OsDisk_1_', uniqueString('caseNumber', subscription().id))]",
         "allIps": "[concat(parameters('readerIpAddresses'), parameters('writerIpAddresses'), array(parameters('adminIpAddress')))]",
         "keyVaultAllowedIps": "[if(parameters('allowAdminToAccessKeyVault'), array(createObject('value', parameters('adminIpAddress'))), createArray())]"
     },
@@ -273,7 +274,7 @@
                     "defaultAction": "Deny"
                 },
                 "supportsHttpsTrafficOnly": true,
-                "encryption": {                    
+                "encryption": {
                     "services": {
                         "file": {
                             "keyType": "Account",
@@ -286,7 +287,7 @@
                     },
                     "requireInfrastructureEncryption": true,
                     "keySource": "Microsoft.Storage",
-                    "identity": {                      
+                    "identity": {
                         "userAssignedIdentity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'storageCmkIdentity')]"
                     }
                 },
@@ -351,7 +352,7 @@
                     "imageReference": "[parameters('vmImageReference')]",
                     "osDisk": {
                         "osType": "Linux",
-                        "name": "[concat(parameters('caseNumber'), '_OsDisk_1_', uniqueString('caseNumber', subscription().id))]",
+                        "name": "[variables('osDiskName')]",
                         "createOption": "FromImage",
                         "caching": "ReadWrite",                        
                         "deleteOption": "Delete",
@@ -494,7 +495,7 @@
             }
         },
         {
-            "name": "storageDiag",
+            "name": "blobStorageDiag",
             "type": "Microsoft.Insights/diagnosticSettings",
             "apiVersion": "2021-05-01-preview",
             "scope": "[format('Microsoft.Storage/storageAccounts/{0}/blobServices/default', variables('storageAccountName'))]",
@@ -520,10 +521,10 @@
                 ],
                 "metrics": []                
             }
-        },        
+        },
         {
             "type": "Microsoft.Authorization/roleAssignments",
-            "comments": "this deploys the VM Identity as secrets reader for the Key Vault.",            
+            "comments": "this deploys the VM Identity as secrets reader for the Key Vault.",
             "name": "[rbac.assignmentName('4633458b-17de-408a-b874-0445c86b69e6', resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), variables('vmName'))]",
             "apiVersion": "2022-04-01",
             "dependsOn": [
@@ -532,6 +533,20 @@
             "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
             "properties": {
                 "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/4633458b-17de-408a-b874-0445c86b69e6",                        
+                "principalId": "[reference(variables('vmName'), '2019-03-01', 'Full').identity.principalId]"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "comments": "this deploys the VM Identity as storage contributor for the blob store.",
+            "name": "[rbac.assignmentName('4633458b-17de-408a-b874-0445c86b69e6', resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), variables('vmName'))]",
+            "apiVersion": "2022-04-01",
+            "dependsOn": [
+                "[variables('storageAccountName')]"
+            ],
+            "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+            "properties": {
+                "roleDefinitionId": "/providers/Microsoft.Authorization/roleDefinitions/ba92f5b4-2d11-453d-a403-e96b0029c9fe",
                 "principalId": "[reference(variables('vmName'), '2019-03-01', 'Full').identity.principalId]"
             }
         },
