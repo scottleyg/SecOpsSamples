@@ -430,7 +430,7 @@ write_files:
 
       This will sign the machine into Azure
       $ az login --identity
-      $ az storage blob list --acount-name $AZURE_STORAGE_ACCOUNT_NAME -c $AZURE_STORAGE_CONTAINER_NAME above
+      $ az storage blob list --account-name $AZURE_STORAGE_ACCOUNT_NAME -c $AZURE_STORAGE_CONTAINER_NAME above
       $ az storage blob upload -f /path/to/file -c $AZURE_STORAGE_CONTAINER_NAME -n MyBlob
       $ az storage blob download -f /path/to/file -c $AZURE_STORAGE_CONTAINER_NAME -n MyBlob
 
